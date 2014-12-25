@@ -16,8 +16,10 @@ class marmCsvExporter
     protected $manufacturersTitle = array();
     protected $categoriesTitle = array();
     protected $contentPage = array();
+    protected $unitTranslation = array();
     protected $googleCategoriesTitle = array();
     protected $entryFields = array();
+    protected $realInventory = array();
     
     /**
      * Loads the shop configuration
@@ -68,6 +70,8 @@ class marmCsvExporter
         
         $this->cacheCategoriesTitles();
         $this->cacheGoogleCategoriesTitles();
+        //$this->cacheInventory();
+        $this->setUnitTranslations();
         $this->cacheManufacturesTitles();
         $this->cacheContentPages();     // for [{oxcontent... in long description
         $parents = $this->getParentProducts();
@@ -92,7 +96,8 @@ class marmCsvExporter
         foreach($parents as $parent)
         {
             //check if is single (OXVARNAME is filled for parent with childs)
-            if($parent['OXVARNAME'] == '')
+            // -- jbl -- if($parent['OXVARNAME'] == '') --- wrong this is optionally
+            if($parent['OXVARCOUNT'] == 0)
             {
                 $this->writeEntryToFile($parent);
             }
@@ -164,6 +169,8 @@ class marmCsvExporter
                 return $this->exchOxContent($this->getLongDescription());
             case '#categoryPath#':
                 return $this->getCategoryPath();
+            case '#amazon_category#':
+                return 'PET_SUPPLIES';
             case '#google_categoryPath#':
                 return $this->getGoogleCategoryPath();
             case '#condition#':
@@ -175,84 +182,52 @@ class marmCsvExporter
             case '#oxprice#':
                 return $this->getProductPrice();
             case '#baseprice#':
-                if ($this->tempProduct['OXUNITQUANTITY'] != 0)
-                    return round($this->getProductPrice()/$this->tempProduct['OXUNITQUANTITY'],2);
+                return $this->getProductBasePrice();
+                /*if ($this->getProductUnitQuantity() != 0) {
+                    //echo '***'.$this->getProductUnitQuantity().'***';
+                    if ($this->tempProduct['OXPARENTID'] == '')             // not a variant
+                        return round($this->getProductPrice()/$this->getProductUnitQuantity(),2);
+                    elseif ($this->tempProduct['OXUNITQUANTITY'] == 0)      // variant without own unit price
+                        return round($this->getProductPrice()/$this->getProductUnitQuantity(),2);
+                    else                                                    // variant with an own unit price
+                        return round($this->getProductPrice()/$this->getProductUnitQuantity(),2);
+                }
                 else
-                    return 0;
+                    return 0;*/
+            case '#basepricetext#':
+                return $this->getProductBasePriceText();
             case '#unitpricingmeasure#':
                 if ( empty($this->tempProduct['OXUNITNAME']) )
                     break;
                 $amount = $this->tempProduct['OXUNITQUANTITY'];
-                switch ($this->tempProduct['OXUNITNAME']) {
-                    case '_UNIT_KG':
-                        $unitMeasure = 'kg';
-                        break;
-                    case '_UNIT_G':
-                        $unitMeasure = 'g';
-                        break;
-                    case '_UNIT_L':
-                        $unitMeasure = 'l';
-                        break;
-                    case '_UNIT_ML':
-                        $unitMeasure = 'ml';
-                        break;
-                    case '_UNIT_CM':
-                        $unitMeasure = 'cm';
-                        break;
-                    case '_UNIT_MM':
-                        $unitMeasure = 'mm';
-                        break;
-                    case '_UNIT_M':
-                        $unitMeasure = 'm';
-                        break;
-                    case '_UNIT_M2':
-                        $unitMeasure = 'm²';
-                        break;
-                    case '_UNIT_M3':
-                        $unitMeasure = 'm³';
-                        break;
-                    default:
-                        $returnValue = preg_match('/[0-9]*/', $this->tempProduct['OXUNITNAME'], $matches, PREG_OFFSET_CAPTURE);
-                        $amount = $this->tempProduct['OXUNITQUANTITY'] * $matches[0][0];
-                        $returnValue = preg_match('/[^0-9 ].*/', $this->tempProduct['OXUNITNAME'], $matches, PREG_OFFSET_CAPTURE);
-                        $unitMeasure = $matches[0][0];
-                        break;
+                if (array_key_exists($this->tempProduct['OXUNITNAME'], $this->unitTranslation))
+                    $unitMeasure = $this->unitTranslation[$this->tempProduct['OXUNITNAME']];
+                else {
+                    $returnValue = preg_match('/[0-9]*/', $this->tempProduct['OXUNITNAME'], $matches, PREG_OFFSET_CAPTURE);
+                    if ((float)$matches[0][0] == 0)
+                        $baseamount = 1;
+                    else
+                        $baseamount = $matches[0][0];
+
+                    $amount = $this->tempProduct['OXUNITQUANTITY'] * $baseamount;
+                    if (empty($amount))
+                        $amount = 1;
+
+                    $returnValue = preg_match('/[^0-9 ].*/', $this->tempProduct['OXUNITNAME'], $matches, PREG_OFFSET_CAPTURE);
+                    $unitMeasure = $matches[0][0];
                 }
                 return $amount . ' ' . $unitMeasure;
             case '#unitpricingbasemeasure#':
                 if ( empty($this->tempProduct['OXUNITNAME']) )
                     break;
-                switch ($this->tempProduct['OXUNITNAME']) {
-                    case '_UNIT_KG':
-                        $baseMeasure = '1 kg';
-                        break;
-                    case '_UNIT_G':
-                        $baseMeasure = '1 g';
-                        break;
-                    case '_UNIT_L':
-                        $baseMeasure = '1 l';
-                        break;
-                    case '_UNIT_ML':
-                        $baseMeasure = '1 ml';
-                        break;
-                    case '_UNIT_CM':
-                        $baseMeasure = '1 cm';
-                        break;
-                    case '_UNIT_MM':
-                        $baseMeasure = '1 mm';
-                        break;
-                    case '_UNIT_M':
-                        $baseMeasure = '1 m';
-                        break;
-                    case '_UNIT_M2':
-                        $baseMeasure = '1 m²';
-                        break;
-                    case '_UNIT_M3':
-                        $baseMeasure = '1 m³';
-                        break;
-                    default:
+                if (array_key_exists($this->tempProduct['OXUNITNAME'], $this->unitTranslation))
+                    $baseMeasure = '1 ' . $this->unitTranslation[$this->tempProduct['OXUNITNAME']];
+                else {
+                    $returnValue = preg_match('/[0-9]*/', $this->tempProduct['OXUNITNAME'], $matches, PREG_OFFSET_CAPTURE);
+                    if ((float)$matches[0][0] == 0)
+                        $baseMeasure = 1 . ' ' . $this->tempProduct['OXUNITNAME'];
+                    else
                         $baseMeasure = $this->tempProduct['OXUNITNAME'];
-                        break;
                 }
                 return $baseMeasure;
             case '#brand#':
@@ -263,12 +238,24 @@ class marmCsvExporter
                 return $this->tempProduct['OXDISTEAN'];                
             case '#mpn#':
                 return $this->getMpn();
+            case '#identifierexists#':
+                if ( ($this->getManufacturesTitle() == '') && (($this->getMpn() == '')  || ($this->tempProduct['OXEAN'] == '')) )
+                    $sVal = 'FALSE';
+                else
+                    $sVal = '';
+                return $sVal;
             case '#oxtitle#':
                 return $this->getTitle();
             case '#oxvarselect#':
                 return $this->getVarName();
             case '#shippingcost#':
                 return $this->getShippingcost();
+            case '#shippingcost_at#':
+                return $this->getShippingcost('at');
+            case '#deliverytime#':
+                return $this->getDeliverytime();
+            case '#deliverytime_at#':
+                return $this->getDeliverytime('at');
             case '#seo_url_parent#':
                 return $this->getSeoUrl(true);
             case '#seo_url#':
@@ -319,8 +306,14 @@ class marmCsvExporter
                     $data = ' ';
                 }
                 // replace csv separator, html tags, tabs and wordwraps from data
-                $replacedata = array($this->_entry['separator'],"\n","\r","\t","\r\n");
-                $data = str_replace($replacedata,'', strip_tags($data));
+                /*$replacedata = array($this->_entry['separator'],"\n","\r","\t","\r\n");
+                $data = str_replace($replacedata,'', strip_tags($data));*/
+                $replacedata = array("\n","\r","\t","\r\n");
+                $data = strip_tags($data);
+                $data = str_replace($this->_entry['separator'],'', $data);
+                $data = str_replace($replacedata,' ', $data);
+                $data = preg_replace("/[[:blank:]]+/"," ",$data);
+                $data = trim($data);
                 
                 $replace[] = $data;
             }
@@ -358,11 +351,19 @@ class marmCsvExporter
             return $this->tempMainCategoryId[$oxid];
         }
         
-        $query="select oxcatnid
+        /* --jbl-- $query="select oxcatnid
                 from oxobject2category
                 where oxobjectid = '".$oxid."'
                 order by oxtime
-                limit 1;";
+                limit 1;";*/
+        $query="SELECT o2c.oxcatnid
+                FROM oxobject2category o2c, oxcategories c 
+                WHERE o2c.oxobjectid = '".$oxid."' 
+                    AND o2c.oxcatnid = c.oxid 
+                    AND c.oxactive = 1 
+                    AND c.oxhidden = 0 
+                ORDER BY o2c.oxtime
+                LIMIT 1;";
         
         $rs = mysql_query($query);
         if ($rs)
@@ -377,6 +378,49 @@ class marmCsvExporter
         // caching query
         $this->tempMainCategoryId[$oxid] = '';
         return '';
+    }
+
+    /**
+     * get the MainCategoryId
+     * @param string oxid
+     * @return string
+     */    
+    public function getAllCategoryIds($oxid)
+    {
+        /*if (isset($this->tempMainCategoryId[$oxid]))
+        {
+            return $this->tempMainCategoryId[$oxid];
+        }*/
+        
+        /* --jbl-- $query="select oxcatnid
+                from oxobject2category
+                where oxobjectid = '".$oxid."'
+                order by oxtime
+                limit 1;";*/
+        $query="SELECT o2c.oxcatnid
+                FROM oxobject2category o2c, oxcategories c 
+                WHERE o2c.oxobjectid = '".$oxid."' 
+                    AND o2c.oxcatnid = c.oxid 
+                    AND c.oxactive = 1 
+                    AND c.oxhidden = 0 
+                ORDER BY o2c.oxtime ";
+        
+        $rs = mysql_query($query);
+        $aCatIds = array();
+        if ($rs)
+        {
+            while($row = mysql_fetch_array($rs))
+            {
+                // caching query
+                /*$this->tempMainCategoryId[$oxid] = $row['oxcatnid'];
+                return $row['oxcatnid'];*/
+                array_push( $aCatIds, $row['oxcatnid'] );
+            }	
+        }
+        // caching query
+        /*$this->tempMainCategoryId[$oxid] = '';
+        return '';*/
+        return $aCatIds;
     }
     
     /**
@@ -458,8 +502,27 @@ class marmCsvExporter
     public function cacheGoogleCategoriesTitles()
     {
         $googleCategories = array();
-        //$query = "SELECT OXID, FCGOOGLETAXONOMY FROM oxcategories";
         $query = "SELECT OXID, JXGOOGLETAXONOMY FROM oxcategories";
+        $rs = mysql_query($query);
+        if ($rs)
+        {
+            while($row = mysql_fetch_array($rs))
+            {
+                //$googleCategories[$row[0]] = array('title' => base64_decode($row[1]));
+                $googleCategories[$row[0]] = array('title' => $row[1]);
+            }
+        }
+        $this->googleCategoriesTitle = $googleCategories;
+    }
+    
+    /**
+     * caching google categories titles
+     * fill $this->googleCategoriesTitle
+     */
+    public function cacheInventory()
+    {
+        $googleCategories = array();
+        $query = "SELECT JXARTID, JXINSTOCK FROM jxinvarticles";
         $rs = mysql_query($query);
         if ($rs)
         {
@@ -508,6 +571,35 @@ class marmCsvExporter
         }
         
         return (string) $shippingcost[$arraymarker]['cost'];
+    }
+	
+    /**
+     * Get the shipping cost
+     * @return string
+     */
+    public function getDeliverytime($sCountryId = 'de')
+    {
+        if ($sCountryId == 'de')
+        {
+            if( isset($this->_config['deliverytime']))
+            {
+                $deliverytime = $this->_config['deliverytime'];
+            }
+        }
+        else
+        {
+            if( isset($this->_config['deliverytime_'.$sCountryId]))
+            {
+                $deliverytime = $this->_config['deliverytime_'.$sCountryId];
+            }
+        }
+        
+        if (!isset($deliverytime)) {
+            return '';
+        }
+
+        return (string) $deliverytime;
+        //---return $this->tempProduct['OXMINDELTIME'] . ' - ' .$this->tempProduct['OXMAXDELTIME'] . ' ' . $this->_config['deliverytimeunits'][$this->tempProduct['OXDELTIMEUNIT']];
     }
 	
     /**
@@ -939,21 +1031,30 @@ class marmCsvExporter
             $oxid = $this->tempParent['OXID'];
         }
         
-        $categoryId = $this->getMainCategoryId($oxid);
+        //-- jbl -- $categoryId = $this->getMainCategoryId($oxid);
+        $aCategoryIds = $this->getAllCategoryIds($oxid);
+        /*echo '<pre>';
+        print_r($aCategoryIds);
+        echo '</pre>';*/
+        if (count($aCategoryIds) != 0)
+            $sCatIdList = "'" . implode("','", $aCategoryIds) . "'";
+        else 
+            $sCatIdList = '';
         
         // if childs allowed but child has no maincategory take the parent category
-        if ($categoryId == '' && isset($this->tempParent['OXID']))
+        /*if ($categoryId == '' && isset($this->tempParent['OXID']))
         {
             $categoryId = $this->getMainCategoryId($this->tempParent['OXID']);
-        }
+        }*/
 
-        if($categoryId != '')
+        if($sCatIdList != '')
         {
             $query="SELECT OXSEOURL
                     FROM oxseo
                     WHERE OXOBJECTID = '".$oxid."' AND
-                    OXPARAMS = '".$categoryId."' AND
-                    OXLANG = ".$this->_config['langid'];
+                    OXPARAMS IN(".$sCatIdList.") AND
+                    OXLANG = ".$this->_config['langid'].
+                    " LIMIT 1";
 
             $rs = mysql_query($query);
             if ($rs)
@@ -1007,6 +1108,119 @@ class marmCsvExporter
     }
     
     /**
+     * get Unit Quantity
+     * 
+     * @return string
+     */
+    public function getProductUnitQuantity()
+    {
+        if ($this->tempProduct['OXPARENTID'] == '') {
+            return $this->tempProduct['OXUNITQUANTITY'];
+        }
+        elseif ($this->tempProduct['OXUNITQUANTITY'] != 0) {
+            return $this->tempProduct['OXUNITQUANTITY'];
+        }
+        else {
+            return $this->tempParent['OXUNITQUANTITY'];
+        }
+    }
+    
+    /**
+     * get Unit Quantity
+     * 
+     * @return string
+     */
+    public function getProductUnitName()
+    {
+        if ($this->tempProduct['OXPARENTID'] == '') {
+            $unitName = $this->tempProduct['OXUNITNAME'];
+        }
+        elseif ($this->tempProduct['OXUNITNAME'] != '') {
+            $unitName = $this->tempProduct['OXUNITNAME'];
+        }
+        else {
+            $unitName = $this->tempParent['OXUNITNAME'];
+        }
+        
+        //echo ' **'.$unitName.'** ';
+        if (array_key_exists($unitName, $this->unitTranslation))
+            return $this->unitTranslation[$unitName];
+        else
+            return $this->getProductCustomUnitName();
+    }
+    
+    /**
+     * get Unit Quantity
+     * 
+     * @return string
+     */
+    public function getProductCustomUnitName()
+    {
+        if ($this->tempProduct['OXPARENTID'] == '') {
+            $unitName = $this->tempProduct['OXUNITNAME'];
+            $unitQuantity = $this->tempProduct['OXUNITQUANTITY'];
+        }
+        elseif ($this->tempProduct['OXUNITNAME'] != '') {
+            $unitName = $this->tempProduct['OXUNITNAME'];
+            $unitQuantity = $this->tempProduct['OXUNITQUANTITY'];
+        }
+        else {
+            $unitName = $this->tempParent['OXUNITNAME'];
+            $unitQuantity = $this->tempParent['OXUNITQUANTITY'];
+        }
+        
+        //$returnValue = preg_match('/[0-9]*/', $unitName, $matches, PREG_OFFSET_CAPTURE);
+        /*if ((float)$matches[0][0] == 0)
+            $baseamount = 1;
+        else
+            $baseamount = $matches[0][0];
+
+        $amount = $unitQuantity * $baseamount;
+        if (empty($amount))
+            $amount = 1;
+*/
+        //$returnValue = preg_match('/[^0-9 ].*/', $unitName, $matches, PREG_OFFSET_CAPTURE);
+        /*$customUnitName = $matches[0][0];
+        echo ' ++'.$customUnitName.'++ ';*/
+        
+        //return $customUnitName;
+        return $unitName;
+    }
+    
+    /**
+     * get Base Price as Number
+     * 
+     * @return string
+     */
+    public function getProductBasePrice()
+    {
+        if ($this->getProductUnitQuantity() != 0) {
+            if ($this->tempProduct['OXPARENTID'] == '')             // not a variant
+                return round($this->getProductPrice()/$this->getProductUnitQuantity(),2);
+            elseif ($this->tempProduct['OXUNITQUANTITY'] == 0)      // variant without own unit price
+                return round($this->getProductPrice()/$this->getProductUnitQuantity(),2);
+            else                                                    // variant with an own unit price
+                return round($this->getProductPrice()/$this->getProductUnitQuantity(),2);
+        }
+        else
+            return 0;
+    }
+    
+    /**
+     * get Base Price as Text
+     * 
+     * @return string
+     */
+    public function getProductBasePriceText()
+    {
+        if ($this->getProductBasePrice() != 0) {
+            return $this->getProductBasePrice() . ' €/' . $this->getProductUnitName();
+        }
+        else
+            return '';
+    }
+    
+    /**
      * get UVP
      * 
      * @return string
@@ -1020,6 +1234,26 @@ class marmCsvExporter
         }
         print_r($this->tempProduct['OXTPRICE']);
         return $uvp;
+    }
+    
+    /**
+     * get UVP
+     * 
+     * @return string
+     */
+    public function setUnitTranslations()
+    {
+        $this->unitTranslation['_UNIT_KG'] = 'kg';
+        $this->unitTranslation['_UNIT_G']  = 'g';
+        $this->unitTranslation['_UNIT_L']  = 'l';
+        $this->unitTranslation['_UNIT_ML'] = 'ml';
+        $this->unitTranslation['_UNIT_M']  = 'm';
+        $this->unitTranslation['_UNIT_CM'] = 'cm';
+        $this->unitTranslation['_UNIT_MM'] = 'mm';
+        $this->unitTranslation['_UNIT_M2'] = 'm²';
+        $this->unitTranslation['_UNIT_M3'] = 'm³';
+        
+        return;
     }
     
     /**
